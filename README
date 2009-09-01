@@ -11,4 +11,4 @@
 ;; if show user images
 (setq twit-show-user-images t)
 (setq twit-user-image-dir
-               (expand-file-name "~/ELISP_LOAD_PASS/twiter/"))
+               (expand-file-name "~/ELISP_LOAD_PATH/twiter/"))
