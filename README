@@ -1,0 +1,14 @@
+;; Installing:
+
+;; There's not much to it.  It you want it always there and ready, you
+;; can add something to your .emacs file like:
+(load "twit")
+(twit-mode t)
+(setq twit-username "YOUR_USERNAME")
+(setq twit-password "YOUR_PASSWORD")
+(setq twit-favorite-friends
+       '("hitoriblog" "otsune" "masui" "miyagawa" "emacs"))
+;; if show user images
+(setq twit-show-user-images t)
+(setq twit-user-image-dir
+               (expand-file-name "~/ELISP_LOAD_PASS/twiter/"))
