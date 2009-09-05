@@ -1,7 +1,8 @@
 ;; Installing:
 
-;; There's not much to it.  It you want it always there and ready, you
-;; can add something to your .emacs file like:
+download growl.el from http://coderepos.org/share/browser/lang/elisp/emacs-growl/trunk/growl.el
+
+;;add something to your .emacs file like:
 (load "twit")
 (twit-mode t)
 (setq twit-username "YOUR_USERNAME")
@@ -12,3 +13,5 @@
 (setq twit-show-user-images t)
 (setq twit-user-image-dir
                (expand-file-name "~/ELISP_LOAD_PATH/twiter/"))
+;; if use growl notification if sending  message for you
+(setq twit-use-growl-notification t)
