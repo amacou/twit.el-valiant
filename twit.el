@@ -204,7 +204,17 @@
 ;;                   (setq twit-show-user-images t)
 ;;                   (setq twit-user-image-dir
 ;;                         (expand-file-name "~/.emacs.d/twiter/"))
-
+;;
+;; 2009-9-6 amacou <http://d.hatena.ne.jp/amacou/>
+;; * 0.0.11-0.1.5 -- filtering already showed message for TL
+;;
+;; 2009-9-6 amacou <http://d.hatena.ne.jp/amacou/>
+;; * 0.0.11-0.1.6 -- add growl notification option
+;;                   download growl.el from http://coderepos.org/share/browser/lang/elisp/emacs-growl/trunk/growl.el
+;;                   and setting
+;;
+;;                   (setq twit-use-growl-notification t)
+;;
 ;; Bugs:
 
 ;; * Posts with semicolons are being silently truncated.  I don't
@@ -235,6 +245,7 @@
 (require 'url)
 (require 'regexp-opt)
 (require 'timezone)
+(require 'growl)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Variables
@@ -253,6 +264,7 @@
 (defvar twit-search-function-use-bill nil)
 (defvar twit-urlencode-default-coding-system 'sjis)
 (defvar twit-urlencode-exceptional-chars "[a-zA-Z0-9]")
+(defvar twit-use-growl-notification nil)
 
 ;;define-key for twit-post-mode-map
 ;;not implemented yet.
@@ -263,55 +275,55 @@
 
 ;;define-key for twit-status-mode-map
 (dolist (info '(
-                                ("d" . twit-destroy-status-or-favorite)
-                                ("a" . twit-create-favorite)
-                                ("n" . twit-forward-jump-message)
-                                ("p" . twit-backward-jump-message)
-                                (">" . twit-jump-to-end-of-status-window)
-                                ("<" . twit-jump-to-beginning-of-status-window)
-                                ("l" . twit-wayback-visit-history)
-                                ("i" . twit-search-function)
-                                ("I" . twit-amazon-function)
-                                ("\ei" . twit-itunes-store-function)
-                                ))
+                ("d" . twit-destroy-status-or-favorite)
+                ("a" . twit-create-favorite)
+                ("n" . twit-forward-jump-message)
+                ("p" . twit-backward-jump-message)
+                (">" . twit-jump-to-end-of-status-window)
+                ("<" . twit-jump-to-beginning-of-status-window)
+                ("l" . twit-wayback-visit-history)
+                ("i" . twit-search-function)
+                ("I" . twit-amazon-function)
+                ("\ei" . twit-itunes-store-function)
+                ))
   (define-key twit-status-mode-map (car info) (cdr info)))
 
 ;;define-key for both mode
 (dolist (info '(
-                                ("A" . twit-following-create)
-                                ("b" . twit-show-favorites)
-                                ("D" . twit-following-destroy)
-                                ("g" . twit-goto-friends-page)
-                                ("j" . twit-scroll-up)
-                                ("k" . twit-scroll-down)
-                                ("@" . twit-show-replies)
-                                ("W" . twit-post-with-user-id)
-                                ("s" . twit-show-recent-tweets)
-                                ("r" . twit-show-recent-tweets)
+                ("A" . twit-following-create)
+                ("b" . twit-show-favorites)
+                ("D" . twit-following-destroy)
+                ("g" . twit-goto-friends-page)
+                ("j" . twit-scroll-up)
+                ("k" . twit-scroll-down)
+                ("@" . twit-show-replies)
+                ("W" . twit-post-with-user-id)
+                ("s" . twit-show-recent-tweets)
+                ("r" . twit-show-recent-tweets)
                 ("F" . twit-list-followers)
                 ("f" . twit-list-friends)
                 ("w" . twit-post)
-                                ("1" . delete-other-windows)
-                                ("q" . twit-delete-status-winow)
-                                ("\C-m" . twit-enter)
-                                ([(shift return)] . twit-shift-enter)
-                                ("\e\C-m" . twit-shift-enter)
-                                ("\C-\i" . twit-next-tabstop)
-                                ([(shift tab)] . twit-previous-tabstop)
-                                ([(shift iso-lefttab)] . twit-previous-tabstop)
-                                ("\e\C-i" . twit-previous-tabstop)
-                                ([mouse-1] . twit-mouse-click)
-                                ))
+                ("1" . delete-other-windows)
+                ("q" . twit-delete-status-winow)
+                ("\C-m" . twit-enter)
+                ([(shift return)] . twit-shift-enter)
+                ("\e\C-m" . twit-shift-enter)
+                ("\C-\i" . twit-next-tabstop)
+                ([(shift tab)] . twit-previous-tabstop)
+                ([(shift iso-lefttab)] . twit-previous-tabstop)
+                ("\e\C-i" . twit-previous-tabstop)
+                ([mouse-1] . twit-mouse-click)
+                ))
   (define-key twit-status-mode-map (car info) (cdr info))
   (define-key twit-followers-mode-map (car info) (cdr info)))
 
 ;;define-key for twit-followers-mode-map
 (dolist (info '(
-                                ("n" . next-line)
-                                ("p" . previous-line)
-                                (">" . end-of-buffer)
-                                ("<" . beginning-of-buffer)
-                                ))
+                ("n" . next-line)
+                ("p" . previous-line)
+                (">" . end-of-buffer)
+                ("<" . beginning-of-buffer)
+                ))
   (define-key twit-followers-mode-map (car info) (cdr info)))
 
 (defvar twit-timer
@@ -332,7 +344,8 @@
 
 (defvar twit-minibuffer-setup-hook nil
   "Hook called when setting up prompt for `twit-post'")
-
+(defvar twit-last-message-id nil)
+(defvar twit-current-max-message-id nil)
 ;; Most of this will be used in the yet-to-be-written twitter
 ;; reading functions.
 (defvar twit-base-url "http://twitter.com")
@@ -341,7 +354,7 @@
 
 (defconst twit-update-url
   (concat twit-base-url "/statuses/update.xml"))
-(defconst twit-puplic-timeline-file
+(defconst twit-public-timeline-file
   (concat twit-base-url "/statuses/public_timeline.xml"))
 (defconst twit-friend-timeline-file
   (concat twit-base-url "/statuses/friends_timeline.xml"))
@@ -379,84 +392,84 @@
 
 (copy-face 'bold 'twit-uri-face)
 (set-face-attribute 'twit-uri-face nil
-                                        :family 'unspecified
-                                        :weight 'normal
-                                        :foreground "blue"
-                                        :width 'semi-condensed
-                                        :underline t
-                                        )
+                    :family 'unspecified
+                    :weight 'normal
+                    :foreground "blue"
+                    :width 'semi-condensed
+                    :underline t
+                    )
 
 (copy-face 'bold 'twit-user-id-face)
 (set-face-attribute 'twit-user-id-face nil
-                                        :family 'unspecified
-                                        :weight 'semi-bold
-                                        :foreground "OliveDrab"
-                                        :width 'semi-condensed
-                                        :underline t
-                                        )
+                    :family 'unspecified
+                    :weight 'semi-bold
+                    :foreground "OliveDrab"
+                    :width 'semi-condensed
+                    :underline t
+                    )
 
 (copy-face 'bold 'twit-protected-user-id-face)
 (set-face-attribute 'twit-protected-user-id-face nil
-                                        :family 'unspecified
-                                        :weight 'semi-bold
-                                        :foreground "red"
-                                        :width 'semi-condensed
-                                        :underline t
-                                        )
+                    :family 'unspecified
+                    :weight 'semi-bold
+                    :foreground "red"
+                    :width 'semi-condensed
+                    :underline t
+                    )
 
 (copy-face 'bold 'twit-author-face)
 (set-face-attribute 'twit-author-face nil
-                                        :family 'unspecified
-                                        :weight 'semi-bold
-                                        :foreground "DarkGreen"
-                                        :width 'semi-condensed
-                                        )
+                    :family 'unspecified
+                    :weight 'semi-bold
+                    :foreground "DarkGreen"
+                    :width 'semi-condensed
+                    )
 
 (copy-face 'bold 'twit-timestamp-face)
 (set-face-attribute 'twit-timestamp-face nil
-                                        :family 'unspecified
-                                        :weight 'normal
-                                        :foreground "SeaGreen"
-                                        :width 'semi-condensed
-                                        )
+                    :family 'unspecified
+                    :weight 'normal
+                    :foreground "SeaGreen"
+                    :width 'semi-condensed
+                    )
 
 (copy-face 'bold 'twit-message-face)
 (set-face-attribute 'twit-message-face nil
-                                        :family "helv"
-                                        :height 1.2
-                                        :weight 'normal
-                                        :width 'semi-condensed
-                                        )
+                    :family "helv"
+                    :height 1.2
+                    :weight 'normal
+                    :width 'semi-condensed
+                    )
 
 (copy-face 'bold 'twit-location-face)
 (set-face-attribute 'twit-location-face nil
-                                        :family 'unspecified
-                                        :weight 'normal
-                                        :foreground "SteelBlue"
-                                        :width 'semi-condensed
-                                        )
+                    :family 'unspecified
+                    :weight 'normal
+                    :foreground "SteelBlue"
+                    :width 'semi-condensed
+                    )
 
 (copy-face 'bold 'twit-src-info-face)
 (set-face-attribute 'twit-src-info-face nil
-                                        :family 'unspecified
-                                        :weight 'normal
-                                        :foreground "SlateBlue3"
-                                        :width 'semi-condensed
-                                        :underline t
-                                        )
+                    :family 'unspecified
+                    :weight 'normal
+                    :foreground "SlateBlue3"
+                    :width 'semi-condensed
+                    :underline t
+                    )
 
 (copy-face 'minibuffer-prompt 'twit-prompt-warning-face)
 
 (set-face-attribute 'twit-prompt-warning-face nil
-                                        :foreground "yellow"
-                                        :weight 'semi-bold
-                                        )
+                    :foreground "yellow"
+                    :weight 'semi-bold
+                    )
 
 (copy-face 'minibuffer-prompt 'twit-prompt-error-face)
 (set-face-attribute 'twit-prompt-error-face nil
-                                        :foreground "red"
-                                        :weight 'bold
-                                        )
+                    :foreground "red"
+                    :weight 'bold
+                    )
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; General purpose library to wrap twitter.com's api
@@ -494,9 +507,9 @@ Emacs' url package will prompt for authentication info if required."
   (twit-regist-once-auth-storage)
   (let ((result nil))
     (save-window-excursion
-          ;(with-timeout (3 (ignore))
+                                        ;(with-timeout (3 (ignore))
       (set-buffer (url-retrieve-synchronously url))
-          ;)
+                                        ;)
       (goto-char (point-min))
       (setq result (xml-parse-fragment))
       (kill-buffer (current-buffer)))
@@ -523,22 +536,22 @@ Emacs' url package will prompt for authentication info if required."
 (defun twit-visit-push-history (user-id kind)
   ""
   (setq twit-visit-history-list
-                (append (list (list user-id kind))
-                                twit-visit-history-list))
-                (if (> (list-length twit-visit-history-list)
-                           twit-visit-max-number-of-history)
-                        (setq twit-visit-history-list
-                                  (butlast twit-visit-history-list))
-                        ))
+        (append (list (list user-id kind))
+                twit-visit-history-list))
+  (if (> (list-length twit-visit-history-list)
+         twit-visit-max-number-of-history)
+      (setq twit-visit-history-list
+            (butlast twit-visit-history-list))
+    ))
 
 ;;Added by moyashi
 (defun twit-visit-pop-history ()
   ""
   (let ((current-user-id (car twit-visit-history-list)))
     (setq twit-visit-history-list
-                  (cdr twit-visit-history-list))
-        current-user-id
-        ))
+          (cdr twit-visit-history-list))
+    current-user-id
+    ))
 
 (defun twit-expand-entities (str)
   "Expand the characters counted specially by Twitter ('<' and
@@ -725,7 +738,7 @@ Helper for `twit-query-for-post'."
         (setq minibuffer-setup-hook old-mbuf-setup)))
     input))
 
-(defun twit-write-tweets (file)
+(defun twit-write-tweets (file &optional filtering)
   (save-excursion
     (delete-region (point-min) (point-max))
     (insert (format-time-string "Last updated: %c\n"))
@@ -743,122 +756,142 @@ Helper for `twit-query-for-post'."
         (let* ((user-info (xml-first-child status-node 'user))
                (user-id (or (xml-first-childs-value user-info 'screen_name) "??"))
                (user-name (xml-first-childs-value user-info 'name))
-;;Added by amacou from twit.el(emacs-wiki)
                (user-img (if twit-show-user-images
-                           (twit-get-user-image (xml-first-childs-value user-info 'profile_image_url) user-id)
+                             (twit-get-user-image (xml-first-childs-value user-info 'profile_image_url) user-id)
                            nil))
-;;Added end
                (location (xml-first-childs-value user-info 'location))
                (url (xml-first-childs-value user-info 'url))
                (src-info (xml-first-childs-value status-node 'source))
                (timestamp (xml-first-childs-value status-node 'created_at))
                (message (xml-first-childs-value status-node 'text))
-                   (message-id (xml-first-childs-value status-node 'id)))
+               (message-id (xml-first-childs-value status-node 'id)))
 
-          ;; make URI clickable
-          (let* ((regex-index 0))
-            (while regex-index
-              (setq regex-index
-                    (string-match "https?://[-_.!~*'()a-zA-Z0-9;/?:@&=+$,%#]+"
-                                  message
-                                  regex-index))
-              (if regex-index
-                  (progn
-                    (incf regex-index)
-                    (add-text-properties
-                     (match-beginning 0) (match-end 0)
-                     (list 'mouse-face 'highlight
-                           'uri (match-string 0 message)
-                           'tabstop "dummy"
-                           'face 'twit-uri-face)
-                     message)
-                    ))))
 
-          ;; make reply clickable may be..
-          (let* ((regex-index 0))
-            (while regex-index
-              (setq regex-index
-                    (string-match "@\\([a-zA-Z0-9_]+\\)"
-                                  message
-                                  regex-index))
-              (if regex-index
-                  (progn
-                    (incf regex-index)
-                    (add-text-properties
-                     (match-beginning 1) (match-end 1)
-                     (list 'mouse-face 'highlight
-                           'uri (match-string 0 message)
-                           'tabstop "dummy"
-                           'face 'twit-uri-face)
-                     message)
-                    ))))
+          (when message-id
+          (if (and twit-current-max-message-id (>= (string-to-int twit-current-max-message-id) (string-to-int message-id)))
+              nil
+            (setq twit-current-max-message-id message-id)))
 
-          ;; the string-match is a bit weird, as emacswiki.org won't
-          ;; accept pages with the href in it per se
-          (setq src-url "http://twitter.com/")
-          (when (and src-info
-                     (string-match
-                      (concat "<a h" "ref=\"\\(.*?\\)\">\\(.*\\)<" "/a>")
-                      src-info))
-            ;; remove the HTML link info; leave just the name
-            (setq src-url (match-string 1 src-info))
-            (setq src-info (match-string 2 src-info)))
-          ;; First line: Name and message
-          (twit-insert-with-overlay-attributes
-           "-----------------------------------------\n"
-           '((face . "twit-author-face")))
-          (add-text-properties 0 (length user-id)
-                               (list
-                                'mouse-face 'highlight
-                                'uri url)
-                               user-id)
-;;Added by amacou from twit.el(emacs-wiki)
-        (when (and twit-show-user-images user-img)
-                  (insert " ")
-                  (insert-image user-img)
-                  (insert " ")
-                  (insert "\n"))
-;;Added end
-          (twit-insert-with-overlay-attributes
-           user-id
-           (list (cons 'face "twit-user-id-face")
-                 (cons 'user-id user-id)
-                 (cons 'message-id message-id)
-                 (cons 'is-favorite (not (null (string-match ".*/favorites.xml" file))))))
-          (twit-insert-with-overlay-attributes
-           (format "%s"
-                   (concat
-                    (if user-name
-                        (concat " (" user-name ") ")
-                      )))
-           '((face . "twit-author-face")))
-          (when timestamp
-            (twit-insert-with-overlay-attributes
-             (twit-http-date-encode
-              (twit-http-date-decode timestamp))
-             '((face . "twit-timestamp-face")))
-            )
-          (insert ":\n")
-          (insert
-           (twit-shrink-entities message))
-          (insert "\n")
-          (when (or location src-info)
-            (insert "from ")
-            (when location
+          ;;hide alrady shown message when update TL
+          (when (or (null filtering)
+                    (and filtering
+                         (or (null twit-last-message-id)
+                             (>= (string-to-int message-id) (string-to-int twit-last-message-id)))))
+            (progn
+              ;; make URI clickable
+              (let* ((regex-index 0))
+                (while regex-index
+                  (setq regex-index
+                        (string-match "https?://[-_.!~*'()a-zA-Z0-9;/?:@&=+$,%#]+"
+                                      message
+                                      regex-index))
+                  (if regex-index
+                      (progn
+                        (incf regex-index)
+                        (add-text-properties
+                         (match-beginning 0) (match-end 0)
+                         (list 'mouse-face 'highlight
+                               'uri (match-string 0 message)
+                               'tabstop "dummy"
+                               'face 'twit-uri-face)
+                         message)
+                        ))))
+
+              ;; make reply clickable may be..
+              (let* ((regex-index 0))
+                (while regex-index
+                  (setq regex-index
+                        (string-match "@\\([a-zA-Z0-9_]+\\)"
+                                      message
+                                      regex-index))
+                  (if regex-index
+                      (progn
+                        (incf regex-index)
+                        (add-text-properties
+                         (match-beginning 1) (match-end 1)
+                         (list 'mouse-face 'highlight
+                               'uri (match-string 0 message)
+                               'tabstop "dummy"
+                               'face 'twit-uri-face)
+                         message)
+                        ))))
+
+              ;; the string-match is a bit weird, as emacswiki.org won't
+              ;; accept pages with the href in it per se
+              (setq src-url "http://twitter.com/")
+              ;; show growl
+              (when (and twit-use-growl-notification filtering)
+                (when (string-match
+                        twit-username
+                        message)
+                  (growl message)))
+
+              (when (and src-info
+                         (string-match
+                          (concat "<a h" "ref=\"\\(.*?\\)\">\\(.*\\)<" "/a>")
+                          src-info))
+                ;; remove the HTML link info; leave just the name
+                (setq src-url (match-string 1 src-info))
+                (setq src-info (match-string 2 src-info)))
+              ;; First line: Name and message
               (twit-insert-with-overlay-attributes
-               location
-               '((face . "twit-location-face"))))
-            (when src-info
-              (progn
-                (insert " (via ")
+               "-----------------------------------------\n"
+               '((face . "twit-author-face")))
+              (add-text-properties 0 (length user-id)
+                                   (list
+                                    'mouse-face 'highlight
+                                    'uri url)
+                                   user-id)
+
+              (when (and twit-show-user-images user-img)
+                (insert " ")
+                (insert-image user-img)
+                (insert " ")
+                (insert "\n"))
+
+              (twit-insert-with-overlay-attributes
+               user-id
+               (list (cons 'face "twit-user-id-face")
+                     (cons 'user-id user-id)
+                     (cons 'message-id message-id)
+                     (cons 'is-favorite (not (null (string-match ".*/favorites.xml" file))))))
+              (twit-insert-with-overlay-attributes
+               (format "%s"
+                       (concat
+                        (if user-name
+                            (concat " (" user-name ") ")
+                          )))
+               '((face . "twit-author-face")))
+              (when timestamp
+                (twit-insert-with-overlay-attributes
+                 (twit-http-date-encode
+                  (twit-http-date-decode timestamp))
+                 '((face . "twit-timestamp-face")))
+                )
+              (insert ":\n")
+              (insert
+               (twit-shrink-entities message))
+              (insert "\n")
+              (when (or location src-info)
+                (insert "from ")
+                (when location
+                  (twit-insert-with-overlay-attributes
+                   location
+                   '((face . "twit-location-face"))))
+                (when src-info
+                  (progn
+                    (insert " (via ")
                     (twit-insert-with-overlay-attributes
                      src-info
                      (list (cons 'face "twit-src-info-face")
                            (cons 'src-url src-url)
                            (cons 'mouse-face 'highlight)
                            ))
-                (insert ")")))
-            (insert "\n")))))
+                    (insert ")")
+                    )
+                  )
+                (insert "\n")))))            ))
+
     ;; go back to top so we see the latest messages
     (goto-char (point-min))))
 
@@ -929,12 +962,12 @@ Helper for `twit-query-for-post'."
             (when src-info
               (progn
                 (insert " (via ")
-                    (twit-insert-with-overlay-attributes
-                     src-info
-                     (list (cons 'face "twit-src-info-face")
-                           (cons 'src-url src-url)
-                           (cons 'mouse-face 'highlight)
-                           ))
+                (twit-insert-with-overlay-attributes
+                 src-info
+                 (list (cons 'face "twit-src-info-face")
+                       (cons 'src-url src-url)
+                       (cons 'mouse-face 'highlight)
+                       ))
                 (insert ")")))
             (insert "\n")))))
     ;; go back to top so we see the latest messages
@@ -945,76 +978,76 @@ Helper for `twit-query-for-post'."
   (save-excursion
     (delete-region (point-min) (point-max))
     (labels ((xml-first-child
-                          (node attr)
-                          (car (xml-get-children node attr)))
-                         (xml-first-childs-value
-                          (node addr)
-                          (car (xml-node-children
-                                        (xml-first-child node addr)))))
+              (node attr)
+              (car (xml-get-children node attr)))
+             (xml-first-childs-value
+              (node addr)
+              (car (xml-node-children
+                    (xml-first-child node addr)))))
       (dolist (user-node
-                           (xml-get-children
-                                (cadr (twit-parse-xml file))
-                                'user))
-                (let* ((status-info (xml-first-child user-node 'status))
-                           (timestamp (xml-first-childs-value status-info 'created_at))
-                           (message (xml-first-childs-value status-info 'text))
-                           (src-info (xml-first-childs-value status-info 'source))
-                           (truncated (xml-first-childs-value status-info 'truncated))
-                           (id (xml-first-childs-value user-node 'id))
-                           (user-name (xml-first-childs-value user-node 'name))
-                           (user-id (or (xml-first-childs-value user-node 'screen_name) "??"))
-                           (location (xml-first-childs-value user-node 'location))
-                           (description (xml-first-childs-value user-node 'description))
-                           (url (xml-first-childs-value user-node 'url))
-                           (protected (xml-first-childs-value user-node 'protected)))
+               (xml-get-children
+                (cadr (twit-parse-xml file))
+                'user))
+        (let* ((status-info (xml-first-child user-node 'status))
+               (timestamp (xml-first-childs-value status-info 'created_at))
+               (message (xml-first-childs-value status-info 'text))
+               (src-info (xml-first-childs-value status-info 'source))
+               (truncated (xml-first-childs-value status-info 'truncated))
+               (id (xml-first-childs-value user-node 'id))
+               (user-name (xml-first-childs-value user-node 'name))
+               (user-id (or (xml-first-childs-value user-node 'screen_name) "??"))
+               (location (xml-first-childs-value user-node 'location))
+               (description (xml-first-childs-value user-node 'description))
+               (url (xml-first-childs-value user-node 'url))
+               (protected (xml-first-childs-value user-node 'protected)))
 
-                  ;; the string-match is a bit weird, as emacswiki.org won't
-                  ;; accept pages with the href in it per se
-                  (setq src-url "http://twitter.com/")
-                  (when (and src-info
-                                         (string-match
-                                          (concat "<a h" "ref=\"\\(.*?\\)\">\\(.*\\)<" "/a>")
-                                          src-info))
-                        ;; remove the HTML link info; leave just the name
-                        (setq src-url (match-string 1 src-info))
-                        (setq src-info (match-string 2 src-info)))
-                  ;; First line: Name and message
-                  (add-text-properties 0 (length user-id)
-                                                           (list
-                                                                'mouse-face 'highlight
-                                                                'uri url)
-                                                           user-id)
-                  (twit-insert-with-overlay-attributes
-                   user-id
-                   (list (if (string= protected "false")
-                                         (cons 'face "twit-user-id-face")
-                                   (cons 'face "twit-protected-user-id-face"))
-                                 (cons 'user-id user-id)))
-                  (twit-insert-with-overlay-attributes
-                   (format "%s"
-                                   (concat
-                                        (if user-name
-                                                (concat " (" user-name ") ")
-                                          )))
-                   '((face . "twit-author-face")))
-                  (insert ": ")
-                  (when (or location src-info)
-                        (insert "from ")
-                        (when location
-                          (twit-insert-with-overlay-attributes
-                           location
-                           '((face . "twit-location-face"))))
-                        (when src-info
-                          (progn
-                                (insert " (via ")
-                                (twit-insert-with-overlay-attributes
-                                 src-info
-                                 (list (cons 'face "twit-src-info-face")
-                                           (cons 'src-url src-url)
-                                           (cons 'mouse-face 'highlight)
-                                           ))
-                                (insert ")")))
-                        (insert "\n")))))
+          ;; the string-match is a bit weird, as emacswiki.org won't
+          ;; accept pages with the href in it per se
+          (setq src-url "http://twitter.com/")
+          (when (and src-info
+                     (string-match
+                      (concat "<a h" "ref=\"\\(.*?\\)\">\\(.*\\)<" "/a>")
+                      src-info))
+            ;; remove the HTML link info; leave just the name
+            (setq src-url (match-string 1 src-info))
+            (setq src-info (match-string 2 src-info)))
+          ;; First line: Name and message
+          (add-text-properties 0 (length user-id)
+                               (list
+                                'mouse-face 'highlight
+                                'uri url)
+                               user-id)
+          (twit-insert-with-overlay-attributes
+           user-id
+           (list (if (string= protected "false")
+                     (cons 'face "twit-user-id-face")
+                   (cons 'face "twit-protected-user-id-face"))
+                 (cons 'user-id user-id)))
+          (twit-insert-with-overlay-attributes
+           (format "%s"
+                   (concat
+                    (if user-name
+                        (concat " (" user-name ") ")
+                      )))
+           '((face . "twit-author-face")))
+          (insert ": ")
+          (when (or location src-info)
+            (insert "from ")
+            (when location
+              (twit-insert-with-overlay-attributes
+               location
+               '((face . "twit-location-face"))))
+            (when src-info
+              (progn
+                (insert " (via ")
+                (twit-insert-with-overlay-attributes
+                 src-info
+                 (list (cons 'face "twit-src-info-face")
+                       (cons 'src-url src-url)
+                       (cons 'mouse-face 'highlight)
+                       ))
+                (insert ")")))
+            (insert "\n")))))
     ;; go back to top so we see the latest messages
     (goto-char (point-min))))
 
@@ -1056,25 +1089,25 @@ USER-ID must be provided."
   (let ((img (assoc url twit-user-image-list)))
     (if (and img (not (bufferp (cdr img))))
         (cdr (assoc url twit-user-image-list))
-        (if (file-exists-p (concat twit-user-image-dir
-                                   "/" user-id "-"
-                                   (file-name-nondirectory url)))
-            (let ((img (create-image
-                        (concat twit-user-image-dir ;; What's an ana for? lol
-                                "/" user-id "-"
-                                (file-name-nondirectory url)))))
-              (add-to-list 'twit-user-image-list (cons url img))
-              img)
-            (let* ((url-request-method "GET")
-                   (url-show-status nil)
-                   (url-buffer (url-retrieve url 'twit-write-user-image
-                                             (list url user-id))))
-              (if url-buffer
-                  (progn
-                    (add-to-list 'twit-user-image-list (cons url url-buffer))
-                  )
-               nil)
-              nil)))))
+      (if (file-exists-p (concat twit-user-image-dir
+                                 "/" user-id "-"
+                                 (file-name-nondirectory url)))
+          (let ((img (create-image
+                      (concat twit-user-image-dir ;; What's an ana for? lol
+                              "/" user-id "-"
+                              (file-name-nondirectory url)))))
+            (add-to-list 'twit-user-image-list (cons url img))
+            img)
+        (let* ((url-request-method "GET")
+               (url-show-status nil)
+               (url-buffer (url-retrieve url 'twit-write-user-image
+                                         (list url user-id))))
+          (if url-buffer
+              (progn
+                (add-to-list 'twit-user-image-list (cons url url-buffer))
+                )
+            nil)
+          nil)))))
 
 ;; Added by amacou from twit.el(emacs-wiki)
 (defun twit-write-user-image (status url user-id)
@@ -1127,8 +1160,8 @@ STATUS, URL and USER-ID are all set by `url-retrieve'."
   (interactive)
   (let ((point (twit-next-property (point) 'tabstop)))
     (if point
-                (progn
-        (goto-char point)))))
+        (progn
+          (goto-char point)))))
 
 ;;Added by moyashi from navi2ch-article.el
 (defun twit-previous-tabstop ()
@@ -1136,8 +1169,8 @@ STATUS, URL and USER-ID are all set by `url-retrieve'."
   (interactive)
   (let ((point (twit-previous-property (point) 'tabstop)))
     (if point
-                (progn
-        (goto-char point)))))
+        (progn
+          (goto-char point)))))
 
 ;;;###autoload
 (defun twit-post ()
@@ -1231,24 +1264,32 @@ This might suck if it bounces the point to the bottom all the time."
   (pop-to-buffer "*Twit*")
   (toggle-read-only 0)
   (if user-id
+      (progn
+        (setq twit-visit-current-history (list user-id kind))
+        (if (string= "user" kind)
+            (twit-write-tweets
+             (concat twit-user-timeline-base-url user-id ".xml"))
+          (twit-write-tweets
+           (concat twit-friends-timeline-base-url user-id ".xml"))))
+    (if (string= "replies" kind)
+        (progn
+          (setq twit-visit-current-history (list user-id kind))
+          (twit-write-tweets twit-replies-file))
+      (if (string= "favorites" kind)
           (progn
-                (setq twit-visit-current-history (list user-id kind))
-                (if (string= "user" kind)
-                        (twit-write-tweets
-                         (concat twit-user-timeline-base-url user-id ".xml"))
-                  (twit-write-tweets
-                   (concat twit-friends-timeline-base-url user-id ".xml"))))
-        (if (string= "replies" kind)
-            (progn
-            (setq twit-visit-current-history (list user-id kind))
-            (twit-write-tweets twit-replies-file))
-          (if (string= "favorites" kind)
-            (progn
             (setq twit-visit-current-history (list user-id kind))
             (twit-write-tweets twit-favorites-file))
-          (setq twit-visit-current-history ())
-          (setq twit-visit-history-list ())
-          (twit-write-tweets twit-friend-timeline-file))))
+        (setq twit-visit-current-history ())
+        (progn
+          (twit-write-tweets
+           (concat twit-friend-timeline-file
+                   (if twit-last-message-id
+                       (concat "?since_id=" twit-last-message-id )
+                     "?count=200")
+                   )
+           t)
+          (setq twit-last-message-id twit-current-max-message-id))
+        (setq twit-visit-history-list ()))))
   ;; set up some sensible mode and useful bindings
   (text-mode)
   (toggle-read-only 1)
@@ -1258,135 +1299,135 @@ This might suck if it bounces the point to the bottom all the time."
 (defun twit-query-for-create-favourings ()
   ""
   (labels ((xml-first-child
-                        (node attr)
-                        (car (xml-get-children node attr)))
-                   (xml-first-childs-value
-                        (node addr)
-                        (car (xml-node-children
-                                  (xml-first-child node addr)))))
-                  (let ((temp-overlay (car (overlays-in (point) (+ (point) 1))))
-                                message-id)
-                        (if (overlayp temp-overlay)
-                                (progn
-                                  (setq message-id (overlay-get temp-overlay 'message-id))
-                                  (if message-id
-                                          (if (y-or-n-p "Are you ready to add to favorite this status?: ")
-                                                  (progn
-                                                        (let*
-                                                                ((error-mes
-                                                                  (xml-first-childs-value
-                                                                   (cadr
-                                                                        (twit-parse-xml
-                                                                         (concat
-                                                                          twit-favourings-create-base-url
-                                                                          message-id
-                                                                          ".xml"))) 'error)))
-                                                          (if (not (null error-mes))
-                                                                  (progn
-                                                                        (ding)
-                                                                        (message (concat " ERROR: " error-mes)))
-                                                                (message "Add done right.")
-                                                                ))))))))))
+            (node attr)
+            (car (xml-get-children node attr)))
+           (xml-first-childs-value
+            (node addr)
+            (car (xml-node-children
+                  (xml-first-child node addr)))))
+    (let ((temp-overlay (car (overlays-in (point) (+ (point) 1))))
+          message-id)
+      (if (overlayp temp-overlay)
+          (progn
+            (setq message-id (overlay-get temp-overlay 'message-id))
+            (if message-id
+                (if (y-or-n-p "Are you ready to add to favorite this status?: ")
+                    (progn
+                      (let*
+                          ((error-mes
+                            (xml-first-childs-value
+                             (cadr
+                              (twit-parse-xml
+                               (concat
+                                twit-favourings-create-base-url
+                                message-id
+                                ".xml"))) 'error)))
+                        (if (not (null error-mes))
+                            (progn
+                              (ding)
+                              (message (concat " ERROR: " error-mes)))
+                          (message "Add done right.")
+                          ))))))))))
 
 ;;Added by moyashi
 (defun twit-query-for-destroy-status-or-favourings ()
   ""
   (labels ((xml-first-child
-                        (node attr)
-                        (car (xml-get-children node attr)))
-                   (xml-first-childs-value
-                        (node addr)
-                        (car (xml-node-children
-                                  (xml-first-child node addr)))))
-                  (let ((temp-overlay (car (overlays-in (point) (+ (point) 1))))
-                                message-id
-                                is-favorite)
-                        (if (overlayp temp-overlay)
-                                (progn
-                                  (setq message-id (overlay-get temp-overlay 'message-id))
-                                  (setq is-favorite (overlay-get temp-overlay 'is-favorite))
-                                  (if message-id
-                                          (if is-favorite
-                                                  (progn
-                                                        (if (y-or-n-p "Are you ready to delete this status from favorites?: ")
-                                                                (progn
-                                                                  (let*
-                                                                          ((error-mes
-                                                                                (xml-first-childs-value
-                                                                                 (cadr
-                                                                                  (twit-parse-xml
-                                                                                   (concat
-                                                                                        twit-favourings-destroy-base-url
-                                                                                        message-id
-                                                                                        ".xml"))) 'error)))
-                                                                        (if (not (null error-mes))
-                                                                                (progn
-                                                                                  (ding)
-                                                                                  (message (concat " ERROR: " error-mes)))
-                                                                          (message "Deleting done right.")
-                                                                          )))))
-                                        (if (y-or-n-p "Are you ready to delete this status?: ")
-                                                (progn
-                                                  (let*
-                                                          ((error-mes
-                                                                (xml-first-childs-value
-                                                                 (cadr
-                                                                  (twit-parse-xml
-                                                                   (concat
-                                                                        twit-statuses-destory-base-url
-                                                                        message-id
-                                                                        ".xml"))) 'error)))
-                                                        (if (not (null error-mes))
-                                                                (progn
-                                                                  (ding)
-                                                                  (message (concat " ERROR: " error-mes)))
-                                                          (message "Deleting done right.")
-                                                          ))))
-                                        )))))))
+            (node attr)
+            (car (xml-get-children node attr)))
+           (xml-first-childs-value
+            (node addr)
+            (car (xml-node-children
+                  (xml-first-child node addr)))))
+    (let ((temp-overlay (car (overlays-in (point) (+ (point) 1))))
+          message-id
+          is-favorite)
+      (if (overlayp temp-overlay)
+          (progn
+            (setq message-id (overlay-get temp-overlay 'message-id))
+            (setq is-favorite (overlay-get temp-overlay 'is-favorite))
+            (if message-id
+                (if is-favorite
+                    (progn
+                      (if (y-or-n-p "Are you ready to delete this status from favorites?: ")
+                          (progn
+                            (let*
+                                ((error-mes
+                                  (xml-first-childs-value
+                                   (cadr
+                                    (twit-parse-xml
+                                     (concat
+                                      twit-favourings-destroy-base-url
+                                      message-id
+                                      ".xml"))) 'error)))
+                              (if (not (null error-mes))
+                                  (progn
+                                    (ding)
+                                    (message (concat " ERROR: " error-mes)))
+                                (message "Deleting done right.")
+                                )))))
+                  (if (y-or-n-p "Are you ready to delete this status?: ")
+                      (progn
+                        (let*
+                            ((error-mes
+                              (xml-first-childs-value
+                               (cadr
+                                (twit-parse-xml
+                                 (concat
+                                  twit-statuses-destory-base-url
+                                  message-id
+                                  ".xml"))) 'error)))
+                          (if (not (null error-mes))
+                              (progn
+                                (ding)
+                                (message (concat " ERROR: " error-mes)))
+                            (message "Deleting done right.")
+                            ))))
+                  )))))))
 
 ;;Added by moyashi
 (defun twit-query-for-following (kind)
   ""
   (if (or (string= kind "create") (string= kind "destroy"))
-          (progn
-                (labels ((xml-first-child
-                                  (node attr)
-                                  (car (xml-get-children node attr)))
-                                 (xml-first-childs-value
-                                  (node addr)
-                                  (car (xml-node-children
-                                                (xml-first-child node addr)))))
-                  (let ((temp-overlay (car (overlays-in (point) (+ (point) 1))))
-                                user-id)
-                        (if (overlayp temp-overlay)
-                                (progn
-                                  (setq user-id (overlay-get temp-overlay 'user-id))
-                                  (if user-id
-                                          (if (y-or-n-p
-                                                   (concat " Are you ready to "
-                                                                   (if (string= kind "create")
-                                                                           "follow" "remove") " " user-id "?: "))
-                                                  (progn
-                                                        (let*
-                                                                ((error-mes
-                                                                  (xml-first-childs-value
-                                                                   (cadr
-                                                                        (twit-parse-xml
-                                                                         (concat
-                                                                          (if (string= kind "create")
-                                                                                  twit-following-create-base-url
-                                                                                twit-following-destroy-base-url)
-                                                                          user-id
-                                                                          ".xml"))) 'error)))
-                                                          (if (not (null error-mes))
-                                                                  (progn
-                                                                        (ding)
-                                                                        (message (concat " ERROR: " error-mes)))
-                                                                (message
-                                                                 (if (string= kind "create")
-                                                                         (concat " You are now following " user-id ".")
-                                                                   (concat " Ok. You are no longer following " user-id ".")))
-                                                                ))))))))))))
+      (progn
+        (labels ((xml-first-child
+                  (node attr)
+                  (car (xml-get-children node attr)))
+                 (xml-first-childs-value
+                  (node addr)
+                  (car (xml-node-children
+                        (xml-first-child node addr)))))
+          (let ((temp-overlay (car (overlays-in (point) (+ (point) 1))))
+                user-id)
+            (if (overlayp temp-overlay)
+                (progn
+                  (setq user-id (overlay-get temp-overlay 'user-id))
+                  (if user-id
+                      (if (y-or-n-p
+                           (concat " Are you ready to "
+                                   (if (string= kind "create")
+                                       "follow" "remove") " " user-id "?: "))
+                          (progn
+                            (let*
+                                ((error-mes
+                                  (xml-first-childs-value
+                                   (cadr
+                                    (twit-parse-xml
+                                     (concat
+                                      (if (string= kind "create")
+                                          twit-following-create-base-url
+                                        twit-following-destroy-base-url)
+                                      user-id
+                                      ".xml"))) 'error)))
+                              (if (not (null error-mes))
+                                  (progn
+                                    (ding)
+                                    (message (concat " ERROR: " error-mes)))
+                                (message
+                                 (if (string= kind "create")
+                                     (concat " You are now following " user-id ".")
+                                   (concat " Ok. You are no longer following " user-id ".")))
+                                ))))))))))))
 
 
 ;;Added by moyashi
@@ -1417,8 +1458,8 @@ This might suck if it bounces the point to the bottom all the time."
 (defun twit-delete-status-winow ()
   (interactive)
   (if (one-window-p)
-          (kill-buffer (current-buffer))
-        (delete-window)))
+      (kill-buffer (current-buffer))
+    (delete-window)))
 
 ;;Added by moyashi
 (defun twit-jump-to-end-of-status-window ()
@@ -1446,11 +1487,11 @@ This might suck if it bounces the point to the bottom all the time."
            post)
       (if (overlayp temp-overlay)
           (if (setq user-id (overlay-get temp-overlay 'user-id))
-            (if (setq post (twit-query-for-post (concat "@" user-id " ")))
-          (if (> (length post) twit-hard-size)
-              (error twit-too-long-msg)
-            (if (twit-post-function twit-update-url post)
-                (message twit-success-msg)))))))))
+              (if (setq post (twit-query-for-post (concat "@" user-id " ")))
+                  (if (> (length post) twit-hard-size)
+                      (error twit-too-long-msg)
+                    (if (twit-post-function twit-update-url post)
+                        (message twit-success-msg)))))))))
 
 ;;Added by moyashi
 (defun twit-jump-message (direction)
@@ -1466,7 +1507,7 @@ This might suck if it bounces the point to the bottom all the time."
       (forward-line)
       (beginning-of-line)
       (recenter 0))
-      ))
+    ))
 
 ;;Added by moyashi
 (defun twit-forward-jump-message ()
@@ -1491,12 +1532,12 @@ This might suck if it bounces the point to the bottom all the time."
 ;;Added by moyashi
 (defun twit-enter (arg)
   (interactive "P")
-      (twit-launch arg nil))
+  (twit-launch arg nil))
 
 ;;Added by moyashi
 (defun twit-shift-enter (arg)
   (interactive "P")
-      (twit-launch arg t))
+  (twit-launch arg t))
 
 ;;Added by moyashi
 (defun twit-wayback-visit-history ()
@@ -1514,28 +1555,28 @@ This might suck if it bounces the point to the bottom all the time."
 ;;Added by moyashi
 (defun twit-launch (prefix shift)
   (let ((temp-overlay (car (overlays-in (point) (+ (point) 1))))
-                (uri (get-text-property (point) 'uri))
-                user-id src-url)
+        (uri (get-text-property (point) 'uri))
+        user-id src-url)
     (if (and (not prefix) (overlayp temp-overlay))
-                (progn
-                  (setq user-id (overlay-get temp-overlay 'user-id))
-                  (setq src-url (overlay-get temp-overlay 'src-url))
-                  (if user-id
-                          (progn
-                                (if (not (null twit-visit-current-history))
-                                        (twit-visit-push-history
-                                         (first twit-visit-current-history)
-                                         (second twit-visit-current-history)))
-                                (twit-show-recent-tweets
-                                 user-id
-                                 (if shift "user" "friend")))
-                        (if src-url
-                                (browse-url src-url)
-                          )))
+        (progn
+          (setq user-id (overlay-get temp-overlay 'user-id))
+          (setq src-url (overlay-get temp-overlay 'src-url))
+          (if user-id
+              (progn
+                (if (not (null twit-visit-current-history))
+                    (twit-visit-push-history
+                     (first twit-visit-current-history)
+                     (second twit-visit-current-history)))
+                (twit-show-recent-tweets
+                 user-id
+                 (if shift "user" "friend")))
+            (if src-url
+                (browse-url src-url)
+              )))
       (if uri
-                  (if (string= (substring uri 0 1) "@")
-                          (twit-show-recent-tweets (substring uri 1) (if shift "user" "friend"))
-                        (browse-url uri))))))
+          (if (string= (substring uri 0 1) "@")
+              (twit-show-recent-tweets (substring uri 1) (if shift "user" "friend"))
+            (browse-url uri))))))
 
 
 ;;Added by moyashi
@@ -1544,9 +1585,9 @@ This might suck if it bounces the point to the bottom all the time."
   (twit-launch nil nil))
 ;;Added by amacou from twit.el(emacs wiki)
 (defcustom twit-show-user-images nil
-   "Show user images beside each users tweet."
-   :type 'boolean
-   :group 'twit)
+  "Show user images beside each users tweet."
+  :type 'boolean
+  :group 'twit)
 ;;Added by amacou from twit.el(emacs wiki)
 (defcustom twit-user-image-dir
   (concat (car image-load-path) "twitter")
@@ -1564,11 +1605,11 @@ This directory need not be created."
 (defun twit-get-keyword ()
   ""
   (or (and
-           transient-mark-mode
-           mark-active
-           (buffer-substring-no-properties
-                (region-beginning) (region-end)))
-          (thing-at-point 'word)))
+       transient-mark-mode
+       mark-active
+       (buffer-substring-no-properties
+        (region-beginning) (region-end)))
+      (thing-at-point 'word)))
 
 ;;Added by moyashi
 ;;(setq twit-search-function-use-bill t)
@@ -1576,62 +1617,62 @@ This directory need not be created."
   ""
   (interactive)
   (let* ((prefix (if twit-search-function-use-bill
-                                         "http://search.live.com/results.aspx?q="
-                                   "http://www.google.com/search?q="))
-                 (postfix (if twit-search-function-use-bill "" "&ie=UTF-8&oe=UTF-8"))
-                 (twit-search-engine (if twit-search-function-use-bill " Live Search" " Google"))
-                 (keyword
-                  (url-hexify-string
-                   (read-from-minibuffer
-                        (concat twit-search-engine " keyword: ")
-                        (twit-get-keyword))))
-                 (url-request-data
-                  (concat
-                   prefix
-                   keyword
-                   postfix)))
-        (unless (string= keyword "")
-          (browse-url url-request-data))))
+                     "http://search.live.com/results.aspx?q="
+                   "http://www.google.com/search?q="))
+         (postfix (if twit-search-function-use-bill "" "&ie=UTF-8&oe=UTF-8"))
+         (twit-search-engine (if twit-search-function-use-bill " Live Search" " Google"))
+         (keyword
+          (url-hexify-string
+           (read-from-minibuffer
+            (concat twit-search-engine " keyword: ")
+            (twit-get-keyword))))
+         (url-request-data
+          (concat
+           prefix
+           keyword
+           postfix)))
+    (unless (string= keyword "")
+      (browse-url url-request-data))))
 
 ;;Added by moyashi
 (defun twit-itunes-store-function ()
   ""
   (interactive)
   (let* ((prefix "http://phobos.apple.com/WebObjects/MZSearch.woa/wa/search?term=")
-                 (keyword
-                  (url-hexify-string
-                   (read-from-minibuffer
-                        "iTunes STORE search keyword: "
-                        (twit-get-keyword))))
-                 (url-request-data
-                  (concat
-                   prefix
-                   keyword)))
-        (unless (string= keyword "")
-          (if (numberp (string-match ".*apple.*" (version)))
-                  (do-applescript (concat "
+         (keyword
+          (url-hexify-string
+           (read-from-minibuffer
+            "iTunes STORE search keyword: "
+            (twit-get-keyword))))
+         (url-request-data
+          (concat
+           prefix
+           keyword)))
+    (unless (string= keyword "")
+      (if (numberp (string-match ".*apple.*" (version)))
+          (do-applescript (concat "
 tell application \"iTunes\"
 open location \"itms://phobos.apple.com/WebObjects/MZSearch.woa/wa/search?term=" keyword "\"
 activate
 end tell"))
-                (browse-url url-request-data)))))
+        (browse-url url-request-data)))))
 
 ;;Added by moyashi
 (defun twit-amazon-function ()
   ""
   (interactive)
   (let* ((prefix "http://www.amazon.jp/s/?__mk_ja_JP=%83J%83%5E%83J%83i&field-keywords=")
-                 (postfix "&search-alias=aps")
-                 (keyword
-                  (twit-urlencode
-                   (read-from-minibuffer
-                        " Amazon search keyword: "
-                        (twit-get-keyword)) 'sjis))
-                 (url-request-data
-                  (concat prefix keyword postfix))
-                  )
-         (unless (string= keyword "")
-           (browse-url url-request-data))))
+         (postfix "&search-alias=aps")
+         (keyword
+          (twit-urlencode
+           (read-from-minibuffer
+            " Amazon search keyword: "
+            (twit-get-keyword)) 'sjis))
+         (url-request-data
+          (concat prefix keyword postfix))
+         )
+    (unless (string= keyword "")
+      (browse-url url-request-data))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Main functions
